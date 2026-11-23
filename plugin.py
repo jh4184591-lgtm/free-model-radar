@@ -74,11 +74,16 @@ def _free_map(models: list[dict]) -> dict[str, dict]:
         if not mid:
             continue
         if _is_free(m):
+            arch = m.get("architecture") or {}
             out[mid] = {
                 "name": m.get("name", ""),
                 "context_length": m.get("context_length"),
                 "created": m.get("created"),
                 "expiration_date": m.get("expiration_date"),
+                "synthesized_free_variant": bool(m.get("synthesizedFreeVariant")),
+                "supports_tools": "tools" in (m.get("supported_parameters") or []),
+                "supports_reasoning": bool(m.get("reasoning")),
+                "modality": arch.get("modality"),
                 "first_seen": None,  # filled by caller from known state
             }
     return out
@@ -229,6 +234,73 @@ def free_model_radar_track(model_id: str = "", window_end: str = "", note: str =
         return json.dumps({"error": f"track failed: {exc!r}"})
 
 
+def _retire_report(models: list[dict], within_days: int = 90) -> dict:
+    """Models whose expiration_date is published BY THE API (not user-supplied).
+    The Nous API currently publishes this on a handful of paid models and none
+    of the free ones, but that can change — watch it rather than assume.
+    """
+    today = datetime.now(timezone.utc).date()
+    rows = []
+    for m in models:
+        exp = m.get("expiration_date")
+        if not exp:
+            continue
+        try:
+            end = datetime.fromisoformat(str(exp).replace("Z", "+00:00")).date()
+        except ValueError:
+            continue
+        days = (end - today).days
+        if days > within_days:
+            continue
+        is_free = _is_free(m)
+        rows.append({
+            "id": m.get("id"),
+            "expiration_date": str(exp),
+            "days_left": days,
+            "free": is_free,
+            "prompt_price": (m.get("pricing") or {}).get("prompt"),
+        })
+    rows.sort(key=lambda r: r["days_left"])
+    return {"rows": rows, "source": "Nous /v1/models expiration_date (API-published)"}
+
+
+def free_model_radar_retire(within_days: int = 90) -> str:
+    """List models with an API-published expiration_date and a countdown.
+    Background/awareness only — these are NOT user-supplied windows.
+    """
+    try:
+        within_days = int(within_days)
+        models = _fetch_models()
+        rep = _retire_report(models, within_days)
+        lines = [
+            "# API-published retire dates",
+            "",
+            f"Checked: {_now()}",
+            "Source: Nous /v1/models `expiration_date` — published by the API, "
+            "NOT user-supplied. Currently set on a few paid models; no free model "
+            "has one as of this build.",
+            "",
+        ]
+        if not rep["rows"]:
+            lines.append(f"No expiration dates within {within_days} days.")
+        else:
+            for r in rep["rows"]:
+                tag = "FREE" if r["free"] else "paid"
+                status = f"ENDED {abs(r['days_left'])}d ago" if r["days_left"] < 0 else (
+                    "today" if r["days_left"] == 0 else f"in {r['days_left']}d"
+                )
+                lines.append(
+                    f"- {r['id']} [{tag}] — expires {r['expiration_date']} ({status})"
+                )
+        return json.dumps({
+            "report": "\n".join(lines),
+            "rows": rep["rows"],
+            "source": rep["source"],
+        })
+    except Exception as exc:
+        return json.dumps({"error": f"retire failed: {exc!r}"})
+
+
 def _closing_soon(known: dict, within_days: int = 7) -> set[str]:
     """User-tracked windows ending within N days (or already ended)."""
     today = datetime.now(timezone.utc).date()
@@ -290,8 +362,16 @@ def free_model_radar_recommend(within_days: int = 7) -> str:
                     if created else "unknown"
                 )
                 marker = " <-- best newest" if i == 1 else ""
+                caps = []
+                if info.get("supports_tools"):
+                    caps.append("tools")
+                if info.get("supports_reasoning"):
+                    caps.append("reasoning")
+                if info.get("synthesized_free_variant"):
+                    caps.append("synthesized-free")
+                cap_txt = "+".join(caps) if caps else "basic"
                 lines.append(
-                    f"{i}. {mid} — ctx {ctx:,}, created {created_txt}{marker}"
+                    f"{i}. {mid} — ctx {ctx:,}, created {created_txt}, {cap_txt}{marker}"
                 )
         return json.dumps({
             "report": "\n".join(lines),
@@ -379,6 +459,31 @@ def plugin_entry(ctx):
         },
         handler=lambda args, **kw: free_model_radar_recommend(
             within_days=args.get("within_days", 7)
+        ),
+        check_fn=lambda: True,
+    )
+    ctx.register_tool(
+        name="free_model_radar_retire",
+        schema={
+            "name": "free_model_radar_retire",
+            "description": (
+                "List Nous models with an API-published expiration_date and a countdown. "
+                "These dates come from Nous /v1/models itself (NOT user-supplied). "
+                "Currently set on a few paid models; no free model has one as of this build."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "within_days": {
+                        "type": "integer",
+                        "description": "Only show dates this many days out (default 90).",
+                    }
+                },
+                "required": [],
+            },
+        },
+        handler=lambda args, **kw: free_model_radar_retire(
+            within_days=args.get("within_days", 90)
         ),
         check_fn=lambda: True,
     )

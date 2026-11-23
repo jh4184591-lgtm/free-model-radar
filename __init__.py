@@ -12,10 +12,11 @@ from .plugin import (
     free_model_radar_status,
     free_model_radar_track,
     free_model_radar_recommend,
+    free_model_radar_retire,
     plugin_entry,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 _STATUS_SCHEMA = {
     "name": "free_model_radar_status",
@@ -75,6 +76,25 @@ _RECOMMEND_SCHEMA = {
 }
 
 
+_RETIRE_SCHEMA = {
+    "name": "free_model_radar_retire",
+    "description": (
+        "List Nous models with an API-published expiration_date and a countdown. "
+        "Dates come from Nous /v1/models itself (NOT user-supplied)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "within_days": {
+                "type": "integer",
+                "description": "Only show dates this many days out (default 90).",
+            }
+        },
+        "required": [],
+    },
+}
+
+
 def register(ctx: Any) -> None:
     ctx.register_tool(
         name="free_model_radar_status",
@@ -100,5 +120,13 @@ def register(ctx: Any) -> None:
         schema=_RECOMMEND_SCHEMA,
         handler=lambda args, **kw: free_model_radar_recommend(
             within_days=args.get("within_days", 7)
+        ),
+    )
+    ctx.register_tool(
+        name="free_model_radar_retire",
+        toolset="free_model_radar",
+        schema=_RETIRE_SCHEMA,
+        handler=lambda args, **kw: free_model_radar_retire(
+            within_days=args.get("within_days", 90)
         ),
     )
