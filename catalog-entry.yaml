@@ -1,0 +1,30 @@
+# Catalog entry — copy to plugin-catalog/free-model-radar.yaml in NousResearch/hermes-agent
+# Fill repo + sha after pushing; sha must be the full 40-char commit hash.
+# Pin the commit you want reviewed. Branches and short SHAs are rejected.
+
+name: free-model-radar
+repo: https://github.com/REPLACE_OWNER/free-model-radar   # <-- your public repo URL
+sha: REPLACE_WITH_40_CHAR_COMMIT_SHA                       # <-- git rev-parse HEAD after push
+subdir: ""
+description: Detect Nous free-model window drift with anonymous, keyless $0 snapshots.
+maintainer: Joshua Harrison
+tier: community
+category: models
+requires_hermes: ">=0.22.2"
+version: "0.1.0"
+docs_url: ""
+image: ""
+screenshots: []
+readme: true
+platforms: []
+title: "Free Model Radar"
+onboarding: false
+default: false
+known_issues: []
+capabilities:
+  provides_tools:
+    - free_model_radar_status
+    - free_model_radar_track
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []
