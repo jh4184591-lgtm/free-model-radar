@@ -229,6 +229,80 @@ def free_model_radar_track(model_id: str = "", window_end: str = "", note: str =
         return json.dumps({"error": f"track failed: {exc!r}"})
 
 
+def _closing_soon(known: dict, within_days: int = 7) -> set[str]:
+    """User-tracked windows ending within N days (or already ended)."""
+    today = datetime.now(timezone.utc).date()
+    out = set()
+    for mid, info in known.items():
+        end = info.get("window_end")
+        if not end:
+            continue
+        try:
+            days = (datetime.fromisoformat(end).date() - today).days
+        except ValueError:
+            continue
+        if days <= within_days:
+            out.add(mid)
+    return out
+
+
+def free_model_radar_recommend(within_days: int = 7) -> str:
+    """Rank currently-free Nous models by newest then context, excluding any
+    whose user-tracked window is closing. Suggests a switch target before a
+    tracked window ends. Ranking is from Nous /v1/models metadata, not a
+    quality benchmark — 'newest / largest context', not 'best quality'.
+    """
+    try:
+        within_days = int(within_days)
+        state = _load_state()
+        known = state.get("known", {})
+        models = _fetch_models()
+        free = _free_map(models)
+        closing = _closing_soon(known, within_days)
+        candidates = [
+            (mid, info) for mid, info in free.items() if mid not in closing
+        ]
+        candidates.sort(
+            key=lambda pair: (
+                pair[1].get("created") or 0,
+                pair[1].get("context_length") or 0,
+            ),
+            reverse=True,
+        )
+        top = candidates[0][0] if candidates else None
+        lines = [
+            "# Free model switch recommendation",
+            "",
+            f"Checked: {_now()}",
+            f"Ranking: newest created, then largest context (metadata only, NOT a quality benchmark).",
+            f"Excluded (tracked window within {within_days}d): "
+            + (", ".join(sorted(closing)) if closing else "none"),
+            "",
+        ]
+        if not candidates:
+            lines.append("No free models outside a closing window — nothing safe to recommend.")
+        else:
+            for i, (mid, info) in enumerate(candidates, 1):
+                ctx = info.get("context_length") or 0
+                created = info.get("created")
+                created_txt = (
+                    datetime.fromtimestamp(created, timezone.utc).strftime("%Y-%m-%d")
+                    if created else "unknown"
+                )
+                marker = " <-- best newest" if i == 1 else ""
+                lines.append(
+                    f"{i}. {mid} — ctx {ctx:,}, created {created_txt}{marker}"
+                )
+        return json.dumps({
+            "report": "\n".join(lines),
+            "recommended": top,
+            "candidates": [mid for mid, _ in candidates],
+            "excluded_closing": sorted(closing),
+        })
+    except Exception as exc:
+        return json.dumps({"error": f"recommend failed: {exc!r}"})
+
+
 # Hermes plugin entry point — ctx provided by the loader.
 def plugin_entry(ctx):
     ctx.register_tool(
@@ -279,6 +353,32 @@ def plugin_entry(ctx):
             model_id=args.get("model_id", ""),
             window_end=args.get("window_end", ""),
             note=args.get("note", ""),
+        ),
+        check_fn=lambda: True,
+    )
+    ctx.register_tool(
+        name="free_model_radar_recommend",
+        schema={
+            "name": "free_model_radar_recommend",
+            "description": (
+                "Rank currently-free Nous models by newest then largest context and "
+                "recommend a switch target, excluding any model whose user-tracked free "
+                "window is closing. Ranking uses Nous /v1/models metadata only — it is "
+                "NOT a quality benchmark. Use before a tracked window ends."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "within_days": {
+                        "type": "integer",
+                        "description": "Exclude windows ending within this many days (default 7).",
+                    }
+                },
+                "required": [],
+            },
+        },
+        handler=lambda args, **kw: free_model_radar_recommend(
+            within_days=args.get("within_days", 7)
         ),
         check_fn=lambda: True,
     )

@@ -65,6 +65,16 @@ def main():
                 "ends TODAY" if days == 0 else f"ends in {days}d"
             )
             alerts.append(f"Free window for {mid}: {status} ({end}) [user-supplied, not Nous API]")
+            # Suggest the best newest free alternative that is NOT itself closing.
+            try:
+                rec = json.loads(mod.free_model_radar_recommend(within_days=7))
+                if rec.get("recommended") and rec["recommended"] != mid:
+                    alerts.append(
+                        f"Best newest free switch target: {rec['recommended']} "
+                        "(metadata ranking, not a quality benchmark)"
+                    )
+            except Exception:
+                pass
 
     if alerts:
         print("FREE MODEL RADAR\n" + "\n".join("- " + a for a in alerts))

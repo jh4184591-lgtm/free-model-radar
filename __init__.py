@@ -11,10 +11,11 @@ from typing import Any
 from .plugin import (
     free_model_radar_status,
     free_model_radar_track,
+    free_model_radar_recommend,
     plugin_entry,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 _STATUS_SCHEMA = {
     "name": "free_model_radar_status",
@@ -54,6 +55,26 @@ _TRACK_SCHEMA = {
 }
 
 
+_RECOMMEND_SCHEMA = {
+    "name": "free_model_radar_recommend",
+    "description": (
+        "Rank currently-free Nous models by newest then largest context and recommend "
+        "a switch target, excluding any model whose user-tracked free window is closing. "
+        "Ranking uses Nous /v1/models metadata only — NOT a quality benchmark."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "within_days": {
+                "type": "integer",
+                "description": "Exclude windows ending within this many days (default 7).",
+            }
+        },
+        "required": [],
+    },
+}
+
+
 def register(ctx: Any) -> None:
     ctx.register_tool(
         name="free_model_radar_status",
@@ -71,5 +92,13 @@ def register(ctx: Any) -> None:
             model_id=args.get("model_id", ""),
             window_end=args.get("window_end", ""),
             note=args.get("note", ""),
+        ),
+    )
+    ctx.register_tool(
+        name="free_model_radar_recommend",
+        toolset="free_model_radar",
+        schema=_RECOMMEND_SCHEMA,
+        handler=lambda args, **kw: free_model_radar_recommend(
+            within_days=args.get("within_days", 7)
         ),
     )

@@ -1,6 +1,6 @@
 name: free-model-radar
-version: "0.1.0"
-description: "Watch Nous free-tier models for window drift. Snapshots the free model set from the public /v1/models endpoint and reports new, vanished, or free-to-paid models, with fallback suggestions and countdowns for announced free windows. No keys, no network beyond Nous public model list, $0."
+version: "0.2.0"
+description: "Watch Nous free-tier models for window drift. Snapshots the free model set from the public /v1/models endpoint and reports new, vanished, or free-to-paid models, with fallback suggestions and countdowns for announced free windows. New: recommend the best newest free switch target before a tracked window closes. No keys, no network beyond Nous public model list, $0."
 author: Joshua Harrison
 license: MIT
 manifest_version: 1
@@ -10,6 +10,7 @@ requires_hermes: ">=0.22.2"
 provides_tools:
   - free_model_radar_status
   - free_model_radar_track
+  - free_model_radar_recommend
 
 provides_hooks: []
 requires_env: []

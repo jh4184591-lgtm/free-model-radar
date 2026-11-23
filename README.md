@@ -12,8 +12,18 @@ No API key, no account, no payment. One anonymous HTTPS GET to the public Nous m
 |---|---|
 | `free_model_radar_status(force_refresh=False)` | Scan + report drift since last scan |
 | `free_model_radar_track(model_id, window_end, note)` | Register/list announced free windows with countdowns |
+| `free_model_radar_recommend(within_days=7)` | Rank current free models by newest-then-context and suggest a switch target, excluding any with a closing tracked window |
 
-Announced windows are labelled **user-supplied, not Nous API** — the plugin never presents a tweet as an API fact.
+Announced windows are labelled **user-supplied, not Nous API** — the plugin never presents a tweet as an API fact. Recommendations are ranked on Nous `/v1/models` metadata (release date + context size) — **not a quality benchmark**.
+
+## Switch before a window closes
+
+```python
+free_model_radar_recommend(within_days=7)
+# -> {"recommended": "meituan/longcat-2.5:free", "excluded_closing": ["tencent/hy4-flash:free"], ...}
+```
+
+The daily watchdog also prints the best newest free switch target when a tracked window comes within 3 days of ending.
 
 ## Install
 
