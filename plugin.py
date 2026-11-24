@@ -318,6 +318,80 @@ def _closing_soon(known: dict, within_days: int = 7) -> set[str]:
     return out
 
 
+def free_model_radar_calendar() -> str:
+    """Write an iCalendar (.ics) of tracked free-window ends + API retire dates.
+    Merge into Google Calendar / Apple Calendar / Outlook. Source is embedded
+    per event so user-supplied windows are never confused with API-published dates.
+    """
+    try:
+        state = _load_state()
+        known = state.get("known", {})
+        def esc(s: str) -> str:
+            return str(s).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+        def stamp(dt: datetime) -> str:
+            return dt.strftime("%Y%m%dT%H%M%SZ")
+
+        now_utc = datetime.now(timezone.utc)
+        events = []
+        # user-supplied tracked windows
+        for mid, info in known.items():
+            end_raw = info.get("window_end")
+            if not end_raw:
+                continue
+            try:
+                end = datetime.fromisoformat(str(end_raw).replace("Z", "+00:00"))
+                if end.tzinfo is None:
+                    end = end.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            note = info.get("note", "")
+            src = info.get("window_source", "user-supplied")
+            events.append([
+                f"UID:fmr-window-{mid.replace('/','-')}-{end_raw}@free-model-radar",
+                f"DTSTAMP:{stamp(now_utc)}",
+                f"DTSTART;VALUE=DATE:{end.strftime('%Y%m%d')}",
+                f"SUMMARY:Free window ends: {esc(mid)}",
+                f"DESCRIPTION:Source: {esc(src)}. Note: {esc(note)}",
+            ])
+        # API-published retire dates
+        models = _fetch_models()
+        for r in _retire_report(models, within_days=365)["rows"]:
+            try:
+                end = datetime.fromisoformat(str(r["expiration_date"]).replace("Z", "+00:00"))
+                if end.tzinfo is None:
+                    end = end.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            events.append([
+                f"UID:fmr-retire-{r['id'].replace('/','-')}-{r['expiration_date']}@free-model-radar",
+                f"DTSTAMP:{stamp(now_utc)}",
+                f"DTSTART;VALUE=DATE:{end.strftime('%Y%m%d')}",
+                f"SUMMARY:Model retires: {esc(r['id'])} ({r['free'] and 'FREE' or 'paid'})",
+                f"DESCRIPTION:Source: Nous /v1/models expiration_date (API-published).",
+            ])
+
+        lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//free-model-radar//EN", "CALSCALE:GREGORIAN"]
+        for ev in events:
+            lines.append("BEGIN:VEVENT")
+            for line in ev:
+                if line in ("BEGIN:VEVENT", "END:VEVENT"):
+                    continue
+                lines.append(line)
+            lines.append("END:VEVENT")
+        lines.append("END:VCALENDAR")
+        path = os.path.join(DATA_DIR, "windows.ics")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\r\n".join(lines) + "\r\n")
+        return json.dumps({
+            "path": path,
+            "events": len(events),
+            "report": f"Wrote {len(events)} event(s) to {path}\n  Import into Apple Calendar / Google Calendar / Outlook.",
+        })
+    except Exception as exc:
+        return json.dumps({"error": f"calendar failed: {exc!r}"})
+
+
 def free_model_radar_recommend(within_days: int = 7) -> str:
     """Rank currently-free Nous models by newest then context, excluding any
     whose user-tracked window is closing. Suggests a switch target before a
@@ -485,5 +559,19 @@ def plugin_entry(ctx):
         handler=lambda args, **kw: free_model_radar_retire(
             within_days=args.get("within_days", 90)
         ),
+        check_fn=lambda: True,
+    )
+    ctx.register_tool(
+        name="free_model_radar_calendar",
+        schema={
+            "name": "free_model_radar_calendar",
+            "description": (
+                "Write an .ics calendar of tracked free-window ends + API-published "
+                "retire dates. Import into Apple/Google/Outlook Calendar. Each event "
+                "labels its source (user-supplied vs API)."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        handler=lambda args, **kw: free_model_radar_calendar(),
         check_fn=lambda: True,
     )

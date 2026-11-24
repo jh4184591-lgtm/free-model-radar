@@ -13,10 +13,11 @@ from .plugin import (
     free_model_radar_track,
     free_model_radar_recommend,
     free_model_radar_retire,
+    free_model_radar_calendar,
     plugin_entry,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 _STATUS_SCHEMA = {
     "name": "free_model_radar_status",
@@ -95,6 +96,16 @@ _RETIRE_SCHEMA = {
 }
 
 
+_CALENDAR_SCHEMA = {
+    "name": "free_model_radar_calendar",
+    "description": (
+        "Write an .ics calendar of tracked free-window ends + API-published "
+        "retire dates. Import into Apple/Google/Outlook Calendar."
+    ),
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}
+
+
 def register(ctx: Any) -> None:
     ctx.register_tool(
         name="free_model_radar_status",
@@ -129,4 +140,10 @@ def register(ctx: Any) -> None:
         handler=lambda args, **kw: free_model_radar_retire(
             within_days=args.get("within_days", 90)
         ),
+    )
+    ctx.register_tool(
+        name="free_model_radar_calendar",
+        toolset="free_model_radar",
+        schema=_CALENDAR_SCHEMA,
+        handler=lambda args, **kw: free_model_radar_calendar(),
     )
