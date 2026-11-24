@@ -1,7 +1,7 @@
 """free-model-radar: Nous free-tier window drift detection.
 
-Registers two tools over a shared implementation in plugin.py. No keys, one
-anonymous HTTPS GET to the public Nous /v1/models endpoint, $0.
+Registers five tools over a shared implementation in plugin.py. Nous and
+OpenRouter are keyless; Groq is optional via GROQ_API_KEY. $0.
 """
 
 from __future__ import annotations
@@ -17,14 +17,14 @@ from .plugin import (
     plugin_entry,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 _STATUS_SCHEMA = {
     "name": "free_model_radar_status",
     "description": (
-        "Snapshot the current Nous free-tier model set and report drift since the last "
-        "scan: new free models, models that vanished or flipped from free to paid, and "
-        "fallback suggestions. Anonymous HTTPS GET only; no keys; $0."
+        "Snapshot the current free-tier model set across Nous, OpenRouter and "
+        "(optionally) Groq and report drift: new free models, models that vanished "
+        "or flipped to paid, and fallbacks. Provider outages never count as drift."
     ),
     "parameters": {
         "type": "object",
@@ -42,13 +42,13 @@ _TRACK_SCHEMA = {
     "name": "free_model_radar_track",
     "description": (
         "Register or list user-supplied free-window announcements (e.g. a model announced "
-        "'free for two weeks'). Nous does not publish these dates, so they are tracked as "
+        "'free for two weeks'). Providers do not publish these dates, so they are tracked as "
         "user-supplied with countdowns. Call with no args to list."
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "model_id": {"type": "string", "description": "Exact model slug, e.g. tencent/hy4-flash:free"},
+            "model_id": {"type": "string", "description": "Model slug, e.g. tencent/hy4-flash:free or nous:tencent/hy4-flash:free"},
             "window_end": {"type": "string", "description": "Announced end date, ISO YYYY-MM-DD"},
             "note": {"type": "string", "description": "Optional source note (tweet, announcement)"},
         },
@@ -60,9 +60,9 @@ _TRACK_SCHEMA = {
 _RECOMMEND_SCHEMA = {
     "name": "free_model_radar_recommend",
     "description": (
-        "Rank currently-free Nous models by newest then largest context and recommend "
-        "a switch target, excluding any model whose user-tracked free window is closing. "
-        "Ranking uses Nous /v1/models metadata only — NOT a quality benchmark."
+        "Rank currently-free models by newest then largest context and recommend a "
+        "switch target, excluding any model whose user-tracked free window is closing. "
+        "Metadata only — NOT a quality benchmark."
     ),
     "parameters": {
         "type": "object",
@@ -80,8 +80,9 @@ _RECOMMEND_SCHEMA = {
 _RETIRE_SCHEMA = {
     "name": "free_model_radar_retire",
     "description": (
-        "List Nous models with an API-published expiration_date and a countdown. "
-        "Dates come from Nous /v1/models itself (NOT user-supplied)."
+        "List models with an API-published expiration_date and a countdown. Dates "
+        "come from provider /v1/models itself (NOT user-supplied). Covers Nous and "
+        "OpenRouter."
     ),
     "parameters": {
         "type": "object",
@@ -99,8 +100,8 @@ _RETIRE_SCHEMA = {
 _CALENDAR_SCHEMA = {
     "name": "free_model_radar_calendar",
     "description": (
-        "Write an .ics calendar of tracked free-window ends + API-published "
-        "retire dates. Import into Apple/Google/Outlook Calendar."
+        "Write an .ics calendar of tracked free-window ends + API-published retire "
+        "dates across providers. Import into Apple/Google/Outlook Calendar."
     ),
     "parameters": {"type": "object", "properties": {}, "required": []},
 }

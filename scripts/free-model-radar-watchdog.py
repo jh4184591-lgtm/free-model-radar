@@ -2,13 +2,14 @@
 """Watchdog wrapper for free-model-radar. Silent unless action is needed.
 
 Emits a short alert only when: a free model drifted (vanished / flipped to
-paid), or a user-tracked free window is within 3 days of ending. Empty stdout
-means silence under `hermes cron --no-agent`.
+paid), an API-published retire date is within 14 days, or a user-tracked free
+window is within 3 days of ending. Empty stdout means silence under
+`hermes cron --no-agent`. Provider outages are reported once as a warning so
+a silent source is never mistaken for "nothing changed".
 """
 import importlib.util
 import json
 import os
-import sys
 from datetime import datetime, timezone
 
 PLUGIN = os.path.expanduser("~/.hermes/plugins/free-model-radar/plugin.py")
@@ -35,6 +36,11 @@ def main():
         return
 
     alerts = []
+    status = data.get("provider_status") or {}
+    for name, s in status.items():
+        if not s.get("ok") and not s.get("skipped"):
+            alerts.append(f"Source {name} unavailable ({s.get('reason', 'unknown')}) — its models were excluded from drift comparison")
+
     drift = data.get("drift")
     if drift:
         if drift.get("flipped_to_paid"):
@@ -43,8 +49,21 @@ def main():
             alerts.append("Removed from catalog: " + ", ".join(drift["removed_from_catalog"]))
         if drift.get("appeared"):
             alerts.append("New free models: " + ", ".join(drift["appeared"]))
-        if drift.get("fallback_suggestions"):
-            alerts.append("Fallbacks: " + ", ".join(drift["fallback_suggestions"]))
+
+    # API-published retire dates from every provider, including free models.
+    try:
+        rep = json.loads(mod.free_model_radar_retire(within_days=14))
+        for r in rep.get("rows", []):
+            if r["days_left"] < 0:
+                continue
+            tag = "FREE" if r["free"] else "paid"
+            when = "today" if r["days_left"] == 0 else f"in {r['days_left']}d"
+            alerts.append(
+                f"API retire date: {r['id']} [{r['provider']}/{tag}] expires "
+                f"{r['expiration_date']} ({when}) [API-published]"
+            )
+    except Exception:
+        pass
 
     try:
         with open(STATE, "r", encoding="utf-8") as fh:
@@ -61,11 +80,10 @@ def main():
         except ValueError:
             continue
         if days <= 3:
-            status = f"ENDED {abs(days)}d ago" if days < 0 else (
+            status_txt = f"ENDED {abs(days)}d ago" if days < 0 else (
                 "ends TODAY" if days == 0 else f"ends in {days}d"
             )
-            alerts.append(f"Free window for {mid}: {status} ({end}) [user-supplied, not Nous API]")
-            # Suggest the best newest free alternative that is NOT itself closing.
+            alerts.append(f"Free window for {mid}: {status_txt} ({end}) [user-supplied, not API]")
             try:
                 rec = json.loads(mod.free_model_radar_recommend(within_days=7))
                 if rec.get("recommended") and rec["recommended"] != mid:
