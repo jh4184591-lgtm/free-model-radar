@@ -1,6 +1,6 @@
 name: free-model-radar
-version: "0.5.0"
-description: "Watch Nous + OpenRouter (+ optional Groq) free-tier models for window drift. Snapshots the free set from public /v1/models endpoints and reports new, vanished, or free-to-paid models, with fallback suggestions and countdowns for announced windows. Recommends the best newest free switch target before a window closes; reports API-published retire dates; exports tracked windows + retire dates as an .ics calendar. Nous/OpenRouter keyless; Groq optional via GROQ_API_KEY. Provider outages never count as drift. $0."
+version: "0.6.0"
+description: "Watch Nous + OpenRouter (+ optional Groq) free-tier models for window drift. Snapshots the free set from public /v1/models endpoints and reports new, vanished, or free-to-paid models, with fallback suggestions and countdowns for announced windows. AUTOMATICALLY switches the configured default to the best same-provider free model when the current one leaves the free list (uses the last of the free usage first); recommends switch targets; reports API-published retire dates; exports tracked windows + retire dates as an .ics calendar. Nous/OpenRouter keyless; Groq optional via GROQ_API_KEY. Provider outages never count as drift. $0."
 author: Joshua Harrison
 license: MIT
 manifest_version: 1
@@ -13,6 +13,7 @@ provides_tools:
   - free_model_radar_recommend
   - free_model_radar_retire
   - free_model_radar_calendar
+  - free_model_radar_auto_switch
 
 provides_hooks: []
 requires_env: []

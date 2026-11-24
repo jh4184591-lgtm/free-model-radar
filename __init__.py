@@ -17,7 +17,7 @@ from .plugin import (
     plugin_entry,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 _STATUS_SCHEMA = {
     "name": "free_model_radar_status",
@@ -97,6 +97,23 @@ _RETIRE_SCHEMA = {
 }
 
 
+_AUTO_SWITCH_SCHEMA = {
+    "name": "free_model_radar_auto_switch",
+    "description": (
+        "AUTOMATICALLY switch the configured default to the best free same-provider "
+        "model when the current one leaves the free list; keeps using the last of "
+        "the free usage first. dry_run=true previews. Never switches on an outage."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "dry_run": {"type": "boolean", "description": "Preview only (default false)."}
+        },
+        "required": [],
+    },
+}
+
+
 _CALENDAR_SCHEMA = {
     "name": "free_model_radar_calendar",
     "description": (
@@ -147,4 +164,12 @@ def register(ctx: Any) -> None:
         toolset="free_model_radar",
         schema=_CALENDAR_SCHEMA,
         handler=lambda args, **kw: free_model_radar_calendar(),
+    )
+    ctx.register_tool(
+        name="free_model_radar_auto_switch",
+        toolset="free_model_radar",
+        schema=_AUTO_SWITCH_SCHEMA,
+        handler=lambda args, **kw: free_model_radar_auto_switch(
+            dry_run=bool(args.get("dry_run", False))
+        ),
     )

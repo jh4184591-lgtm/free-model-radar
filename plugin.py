@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -573,6 +575,118 @@ def free_model_radar_recommend(within_days: int = 7) -> str:
         return json.dumps({"error": f"recommend failed: {exc!r}"})
 
 
+_HERMES_BIN = os.environ.get("HERMES_BIN") or shutil.which("hermes") or os.path.expanduser("~/.local/bin/hermes")
+
+
+def _current_model() -> str:
+    """Read the effective default model via the supported config CLI."""
+    try:
+        proc = subprocess.run(
+            [_HERMES_BIN, "config", "get", "model.default"],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        if proc.returncode != 0:
+            return ""
+        return (proc.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _set_current_model(model_id: str) -> tuple[bool, str]:
+    """Set the effective default model via the supported config CLI."""
+    try:
+        proc = subprocess.run(
+            [_HERMES_BIN, "config", "set", "model.default", model_id],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        if proc.returncode != 0:
+            return False, (proc.stderr or proc.stdout or "config set failed").strip()[:200]
+        return True, ""
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, repr(exc)[:200]
+
+
+def free_model_radar_auto_switch(dry_run: bool = False) -> str:
+    """Switch the configured default away from a free model that is no longer free.
+
+    AUTOMATIC. Keeps using the current model until it actually leaves the free
+    list (so the last of its usage is not wasted), then switches the default to
+    the best free model on the SAME provider. Never switches on a provider
+    outage or to a closing window. Applies to the next session; the model of a
+    session already running cannot be changed from outside it.
+    """
+    try:
+        state = _load_state()
+        current = _current_model()
+        if not current:
+            return json.dumps({"phase": "no_config", "switched": False,
+                               "alert": "Could not read the current default model — no switch made."})
+        current_ns = current if current.split(":", 1)[0] in PROVIDERS else f"nous:{current}"
+
+        models, status = _fetch_all()
+        if not status.get("nous", {}).get("ok"):
+            return json.dumps({"phase": "source_down", "switched": False, "current": current,
+                               "alert": "Nous source unavailable — no automatic switch made (not treating outage as model loss)."})
+
+        free = _free_map(models)
+        known = state.get("known", {})
+        closing = _closing_soon(known, 7)
+        info = known.get(current_ns, {})
+        window_end = info.get("window_end")
+
+        if current_ns in free:
+            endtxt = f" (announced end {window_end} has passed — still listed free, keep using it)" if (
+                window_end and window_end < datetime.now(timezone.utc).date().isoformat()
+            ) else ""
+            return json.dumps({
+                "phase": "still_free", "switched": False, "current": current,
+                "window_end": window_end,
+                "alert": f"Still using {current}: it is still free{endtxt}. No switch yet — "
+                         "we'll switch automatically the moment it leaves the free list.",
+            })
+
+        # Current model is gone from the free set. Pick a safe same-provider target.
+        candidates = [
+            (mid, meta) for mid, meta in free.items()
+            if mid.startswith("nous:") and mid != current_ns and mid not in closing
+        ]
+        candidates.sort(
+            key=lambda pair: (pair[1].get("created") or 0, pair[1].get("context_length") or 0),
+            reverse=True,
+        )
+        if not candidates:
+            return json.dumps({
+                "phase": "no_target", "switched": False, "current": current,
+                "alert": f"ALERT: {current} is no longer free, but there is no safe Nous free "
+                         "model outside a closing window — default left unchanged.",
+            })
+
+        target_ns, target_meta = candidates[0]
+        target_id = target_meta.get("provider_model_id") or target_ns.split(":", 1)[1]
+        if dry_run:
+            return json.dumps({"phase": "would_switch", "switched": False, "current": current,
+                               "target": target_id, "alert": f"DRY RUN: would switch {current} -> {target_id}"})
+
+        ok, err = _set_current_model(target_id)
+        if not ok:
+            return json.dumps({"phase": "config_error", "switched": False, "current": current,
+                               "target": target_id, "alert": f"ALERT: {current} is no longer free but the automatic switch failed: {err}"})
+
+        log = state.setdefault("switch_log", [])
+        log.append({"at": _now(), "from": current, "to": target_id,
+                    "reason": "no longer in free list", "mode": "automatic"})
+        state["switch_log"] = log[-20:]
+        _save_state(state)
+        return json.dumps({
+            "phase": "switched", "switched": True, "from": current, "to": target_id,
+            "alert": f"AUTOMATIC SWITCH DONE: {current} is no longer free. Default is now "
+                     f"{target_id} (metadata ranking, not a quality benchmark). "
+                     "Takes effect on the next session — this one keeps its current model.",
+        })
+    except Exception as exc:
+        return json.dumps({"error": f"auto switch failed: {exc!r}"})
+
+
 # Hermes plugin entry point — ctx provided by the loader.
 def plugin_entry(ctx):
     ctx.register_tool(
@@ -692,5 +806,33 @@ def plugin_entry(ctx):
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
         handler=lambda args, **kw: free_model_radar_calendar(),
+        check_fn=lambda: True,
+    )
+
+    ctx.register_tool(
+        name="free_model_radar_auto_switch",
+        schema={
+            "name": "free_model_radar_auto_switch",
+            "description": (
+                "AUTOMATICALLY switch the configured default model to the best free "
+                "same-provider model when the current one leaves the free list. Keeps "
+                "using the current model until the last of its free usage is spent. "
+                "Never switches on a provider outage or to a closing window. Use "
+                "dry_run=true to preview. Takes effect on the next session."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Preview the switch without changing config (default false).",
+                    }
+                },
+                "required": [],
+            },
+        },
+        handler=lambda args, **kw: free_model_radar_auto_switch(
+            dry_run=bool(args.get("dry_run", False))
+        ),
         check_fn=lambda: True,
     )

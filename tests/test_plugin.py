@@ -240,3 +240,80 @@ class StatusAndRecommendTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class AutoSwitchTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpd = tempfile.TemporaryDirectory()
+        self.old_state = fmr.STATE_FILE
+        fmr.STATE_FILE = os.path.join(self.tmpd.name, "state.json")
+
+    def tearDown(self):
+        fmr.STATE_FILE = self.old_state
+        self.tmpd.cleanup()
+
+    def _fetch(self, models):
+        return models, {"nous": {"ok": True}, "openrouter": {"ok": False}}
+
+    def test_still_free_does_not_switch(self):
+        models = [nous_model("meituan/longcat-2.5:free")]
+        with patch.object(fmr, "_current_model", return_value="meituan/longcat-2.5:free"), \
+             patch.object(fmr, "_fetch_all", return_value=self._fetch(models)), \
+             patch.object(fmr, "_set_current_model") as setter:
+            r = json.loads(fmr.free_model_radar_auto_switch())
+        self.assertEqual(r["phase"], "still_free")
+        setter.assert_not_called()
+
+    def test_gone_model_switches_to_best_same_provider(self):
+        old = nous_model("old/dead:free", created=1700000100, context_length=999999)
+        models = [
+            nous_model("meituan/longcat-2.5:free", created=1700000000, context_length=1000),
+            nous_model("new/best:free", created=1700000200, context_length=2000),
+        ]
+        with patch.object(fmr, "_current_model", return_value="old/dead:free"), \
+             patch.object(fmr, "_fetch_all", return_value=self._fetch(models)), \
+             patch.object(fmr, "_set_current_model", return_value=(True, "")) as setter:
+            r = json.loads(fmr.free_model_radar_auto_switch())
+        self.assertEqual(r["phase"], "switched")
+        self.assertEqual(r["to"], "new/best:free")
+        setter.assert_called_once_with("new/best:free")
+        self.assertEqual(json.load(open(fmr.STATE_FILE))["switch_log"][0]["to"], "new/best:free")
+
+    def test_excludes_closing_window_target(self):
+        closing = "new/closing:free"
+        with open(fmr.STATE_FILE, "w") as f:
+            json.dump({"version": 2, "known": {f"nous:{closing}": {"window_end": "2026-11-25"}}}, f)
+        models = [nous_model(closing, created=1700000300, context_length=9000),
+                  nous_model("safe/pick:free", created=1700000000, context_length=1000)]
+        with patch.object(fmr, "_current_model", return_value="old/dead:free"), \
+             patch.object(fmr, "_fetch_all", return_value=self._fetch(models)), \
+             patch.object(fmr, "_set_current_model", return_value=(True, "")) as setter:
+            r = json.loads(fmr.free_model_radar_auto_switch())
+        self.assertEqual(r["to"], "safe/pick:free")
+        setter.assert_called_once_with("safe/pick:free")
+
+    def test_outage_never_switches(self):
+        with patch.object(fmr, "_current_model", return_value="old/dead:free"), \
+             patch.object(fmr, "_fetch_all", return_value=([], {"nous": {"ok": False}})), \
+             patch.object(fmr, "_set_current_model") as setter:
+            r = json.loads(fmr.free_model_radar_auto_switch())
+        self.assertEqual(r["phase"], "source_down")
+        self.assertFalse(r["switched"])
+        setter.assert_not_called()
+
+    def test_no_safe_target_leaves_config_alone(self):
+        with patch.object(fmr, "_current_model", return_value="old/dead:free"), \
+             patch.object(fmr, "_fetch_all", return_value=self._fetch([])), \
+             patch.object(fmr, "_set_current_model") as setter:
+            r = json.loads(fmr.free_model_radar_auto_switch())
+        self.assertEqual(r["phase"], "no_target")
+        setter.assert_not_called()
+
+    def test_dry_run_is_read_only(self):
+        models = [nous_model("safe/pick:free")]
+        with patch.object(fmr, "_current_model", return_value="old/dead:free"), \
+             patch.object(fmr, "_fetch_all", return_value=self._fetch(models)), \
+             patch.object(fmr, "_set_current_model") as setter:
+            r = json.loads(fmr.free_model_radar_auto_switch(dry_run=True))
+        self.assertEqual(r["phase"], "would_switch")
+        setter.assert_not_called()

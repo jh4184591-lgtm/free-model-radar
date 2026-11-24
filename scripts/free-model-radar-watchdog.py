@@ -25,6 +25,16 @@ def load_module():
 
 def main():
     mod = load_module()
+    try:
+        switch = json.loads(mod.free_model_radar_auto_switch())
+    except Exception:
+        switch = {}
+    alerts = []
+    # "still_free" is intentionally silent: it means keep using the last of
+    # the free window. Only a completed/needed switch is a real ping.
+    if switch.get("phase") in ("switched", "no_target", "config_error"):
+        alerts.append(switch.get("alert", ""))
+
     raw = mod.free_model_radar_status()
     try:
         data = json.loads(raw)
@@ -35,7 +45,6 @@ def main():
         print("free-model-radar: " + str(data["error"]))
         return
 
-    alerts = []
     status = data.get("provider_status") or {}
     for name, s in status.items():
         if not s.get("ok") and not s.get("skipped"):
@@ -86,7 +95,7 @@ def main():
             alerts.append(f"Free window for {mid}: {status_txt} ({end}) [user-supplied, not API]")
             try:
                 rec = json.loads(mod.free_model_radar_recommend(within_days=7))
-                if rec.get("recommended") and rec["recommended"] != mid:
+                if rec.get("recommended") and rec["recommended"] != mid and not switch.get("switched"):
                     alerts.append(
                         f"Best newest free switch target: {rec['recommended']} "
                         "(metadata ranking, not a quality benchmark)"
