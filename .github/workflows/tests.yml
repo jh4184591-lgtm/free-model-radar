@@ -1,0 +1,19 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # All run: steps below are static — no github.event input is interpolated.
+      - name: Compile
+        run: python -m py_compile plugin.py __init__.py scripts/free-model-radar-watchdog.py
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
